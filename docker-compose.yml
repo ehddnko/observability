@@ -1,0 +1,139 @@
+# See configuration docs: 
+# - Node exporter: https://prometheus.io/docs/guides/node-exporter/
+# - cAdvisor: https://github.com/google/cadvisor/blob/master/docs/running.md
+# - Prometheus: https://prometheus.io/docs/introduction/overview/
+# - Alertmanager: https://prometheus.io/docs/alerting/latest/alertmanager/
+# - Grafana: https://grafana.com/docs/grafana/latest/setup-grafana/installation/docker/
+#
+# Github links:
+# - Node exporter: https://github.com/prometheus/node_exporter
+# - cAdvisor: https://github.com/google/cadvisor
+# - Prometheus: https://github.com/prometheus/prometheus
+# - Alertmanager: https://github.com/prometheus/alertmanager
+# - Grafana: https://github.com/grafana/grafana
+
+version: "3"
+services:
+  nginx:
+    image: nginx:stable
+    restart: always
+    ports:
+      - "43604:43604"
+    networks:
+      - observability-network
+    volumes:
+      - /home/dev/data/certs/cert.pem:/cert.pem
+      - /home/dev/data/certs/cert.key:/key.pem
+      - /home/dev/data/certs/dhparams4096.pem:/dhparams4096.pem
+      - ${PWD}/nginx/conf.d:/etc/nginx/conf.d:ro
+      - /etc/localtime:/etc/localtime:ro
+
+  node-exporter:
+    image: prom/node-exporter:v1.6.0
+    container_name: node-exporter
+    volumes:
+      # Virtual file system that contains information about the current status of the system's kernel and processes.
+      - '/proc:/host/proc:ro'
+      # The mount point of the Sysfs filesystem, which primarily provides information about hardware devices and drivers.
+      - '/sys:/host/sys:ro'
+      # The host's root filesystem ('/') that allowed to collect important metrics such as filesystem usage.
+      - '/:/rootfs:ro,rslave'
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      # Exclude metrics from these directories is that they contain system metadata (typically contain data that the operating system uses internally), 
+      # but they do not relate to user data or the system metrics that Node Exporter typically collects (such as CPU usage, memory usage, etc.).
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|rootfs/var/lib/docker/containers|rootfs/var/lib/docker/overlay2|rootfs/run/docker/netns|rootfs/var/lib/docker/aufs)($$|/)'
+    expose:
+      - '9100'
+    pid: 'host'
+    network_mode: 'host'
+    # networks:
+    #   - observability-network
+    restart: always
+
+  cadvisor:
+    # used specific version name because of GCR issue (https://github.com/google/cadvisor/issues/3066)
+    image: gcr.io/cadvisor/cadvisor:v0.47.1
+    container_name: cadvisor
+    volumes:
+      - '/:/rootfs:ro'
+      - '/var/run:/var/run:ro'
+      - '/sys:/sys:ro'
+      - '/var/lib/docker/:/var/lib/docker:ro'
+    privileged: true
+    devices:
+      - '/dev/kmsg:/dev/kmsg'
+    expose:
+      - '8080'
+    networks:
+      - observability-network
+    restart: always
+
+  prometheus:
+    image: prom/prometheus:v2.44.0
+    container_name: prometheus
+    volumes:
+      - './prometheus:/etc/prometheus'
+      - 'prometheus_data:/prometheus'
+    command:
+      # Configuration file path.
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      # Where Prometheus writes its database.
+      - '--storage.tsdb.path=/prometheus'
+      # When to remove old data. Defaults to 15d.
+      - '--storage.tsdb.retention.time=15d'
+      # Consoles also have access to all the templates defined with {{define "templateName"}}...{{end}} found in *.lib files in the directory 
+      # pointed to by the -web.console.libraries flag.
+      # "/etc/prometheus/console_libraries" is symbolic link of "/usr/share/prometheus/console_libraries"
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      # Consoles are exposed on /consoles/, and sourced from the directory pointed to by the -web.console.templates flag.
+      # "/etc/prometheus/consoles" is symbolic link of "/usr/share/prometheus/consoles"
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      # A configuration reload is triggered by sending a SIGHUP to the Prometheus process or sending a HTTP POST request to the /-/reload endpoint 
+      # when the --web.enable-lifecycle flag is enabled.
+      - '--web.enable-lifecycle'
+      # Set log level
+      - '--log.level=error'
+    expose:
+      - '9090'
+    networks:
+      - observability-network
+    restart: always
+    depends_on:
+      - cadvisor
+      - node-exporter
+
+  grafana:
+    image: grafana/grafana:9.5.2
+    container_name: grafana
+    volumes:
+      # persistent volume for data in /var/lib/grafana (database and plugins)
+      - 'grafana_data:/var/lib/grafana'
+      # mount pre-defined dashboards and configurations
+      - './grafana/provisioning/dashboards.yml:/etc/grafana/provisioning/dashboards/provisioning-dashboards.yaml:ro'
+      - './grafana/provisioning/datasources.yml:/etc/grafana/provisioning/datasources/provisioning-datasources.yaml:ro'
+      - './grafana/dashboards/container-metrics.json:/var/lib/grafana/dashboards/container-metrics.json:ro'
+      - './grafana/dashboards/node-metrics.json:/var/lib/grafana/dashboards/node-metrics.json:ro'
+    environment:
+      - 'GF_AUTH_ANONYMOUS_ENABLED=false'
+      - 'GF_LOG_MODE=console'
+      - 'GF_LOG_LEVEL=error'
+      - 'GF_PANELS_ENABLE_ALPHA=true'
+      - 'GF_INSTALL_PLUGINS=grafana-polystat-panel'
+    expose:
+      - '3000'
+    networks:
+      - observability-network
+    restart: always
+    depends_on:
+      - prometheus
+
+# networks
+networks:
+  observability-network: {}
+
+volumes:
+  prometheus_data: {}
+  grafana_data: {}
