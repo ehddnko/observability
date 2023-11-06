@@ -91,21 +91,21 @@ Grafana, Prometheus, Node Exporter, cAdvisor를 사용하여 컨테이너 및 �
 ## Usage
 
 - compose up
-```bash
-$ docker compose -p observability -f docker-compose.yml up -d
-```
+	```bash
+	$ docker compose -p observability -f docker-compose.yml up -d
+	```
 
 - compose down
-```bash
-$ docker compose -p observability -f docker-compose.yml down
-```
+	```bash
+	$ docker compose -p observability -f docker-compose.yml down
+	```
 
 - list containers via `docker compose`
-```bash
-$ docker compose -p observability -f docker-compose.yml ps
-```
+	```bash
+	$ docker compose -p observability -f docker-compose.yml ps
+	```
 
 - Fetch the logs of a container
-```bash
-$ docker logs -f <Container name>
-```
+	```bash
+	$ docker logs -f <Container name>
+	```
